@@ -144,18 +144,6 @@ def post_request(body):
     for chunk in req['response']['chunks']:
         print(chunk['alternatives'][0]['text'])
 
-from enum import Enum
-class Demos(Enum):
-    VARIABLE1 = "Car"
-    VARIABLE2 = "Bus"
-    VARIABLE3 = "Example"
-    VARIABLE4 = "Example2"
-
-
-class AbonentType(Enum):
-    Operator = 1
-    Abonent = 2
-    Specialist = 999
 
 if __name__ == '__main__':
     unzip()
@@ -165,12 +153,5 @@ if __name__ == '__main__':
     print(body_list[0])
     """    con = connect_session()
         post_request(body_list[0])"""
-    for variable in Demos:
-        print(variable.value)
-    mas = [1, 2, 1, 2, 999, 3, 4, 6, 999, 2, 1]
-    for i in mas:
-        for abonent in AbonentType:
-            if i == abonent.value:
-                print(abonent.value)
 
 
