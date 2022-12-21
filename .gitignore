@@ -1,0 +1,5 @@
+/.env
+/venv
+src/logs.log
+src/FILES
+.idea
