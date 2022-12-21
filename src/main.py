@@ -3,16 +3,14 @@ import time
 import json
 import boto3
 import os
-import sys
 from pydub import AudioSegment
 from dotenv import load_dotenv
 import zipfile
 import logging
 load_dotenv()
 
-link = os.getenv('storage_link') + os.getenv('bucket_name')
-api_key = ''
-header = {'Authorization': 'Api-Key {}'.format(api_key)}
+link = os.getenv('storage_link') + os.getenv('bucket_name') + "/"
+header = {'Authorization': 'Api-Key {}'.format(os.getenv('api_key'))}
 
 FORMAT = '%(asctime)s: %(levelname)s: %(name)s %(module)s: %(message)s'
 filename_log = str(os.getenv('LOGS_PATH') + os.getenv('FILENAME_LOG'))
@@ -77,8 +75,12 @@ def unzip():
                 unzip_files(os.getenv('FILES_PATH') + '/' + entry.name)
 
 
-def upload_to_bucket(s3, file_ogg_path):
-    s3.upload_file(file_ogg_path, os.getenv('name_bucket'), file_ogg_path)
+def upload_to_bucket(s3, file_wav_path, path):
+    key = 'FILES' + '/' + path + '/'
+    print(key+file_wav_path)
+    print(key)
+    s3.put_object(Bucket=os.getenv('bucket_name'), Key=key)
+    s3.upload_file(key+file_wav_path, os.getenv('bucket_name'), key+file_wav_path)
 
 
 def save_body_list():
@@ -87,17 +89,19 @@ def save_body_list():
         for entry in it:
             if not os.path.splitext(entry.name)[-1]:
                 for file in os.scandir(entry):
-                    if os.path.splitext(file)[-1] == '.ogg':
-                        file_ogg = file.name
+                    if os.path.splitext(file)[-1] == '.wav':
+                        file_wav = str(os.path.dirname(file) + "/" + os.path.basename(file))
                         body_list.append({
                             "config": {
                                 "specification": {
                                     "languageCode": "ru-RU",
-                                    "model": "deferred-general"
+                                    "audioEncoding": "LINEAR16_PCM",
+                                    "model": "deferred-general",
+                                    "sampleRateHertz": 8000
                                 }
                             },
                             "audio": {
-                                "uri": link + file_ogg
+                                "uri": link + file_wav
                             }
                         })
     return body_list
@@ -111,9 +115,12 @@ def save_json_recognition(req, filename):
 
 
 def save_text_recognition(req, filename):
-    with open(f'{filename}.txt', 'w', encoding='utf-8') as file:
-        for chunk in req['response']['chunks']:
-            file.write(chunk['alternatives'][0]['text'])
+    try:
+        with open(f'{filename}.txt', 'w', encoding='utf-8') as file:
+            for chunk in req['response']['chunks']:
+                file.writelines(chunk['alternatives'][0]['text'])
+    except Exception as e:
+        local_logger.error(e, exc_info=True)
 
 
 def post_request(body):
@@ -121,7 +128,7 @@ def post_request(body):
     data = req.json()
     local_logger.info(f"data: {data}")
     print(data)
-    idx = data['id']
+    id = data['id']
     step = 30
     tt = 0
     # Запрашивать на сервере статус операции, пока распознавание не будет завершено.
@@ -130,28 +137,48 @@ def post_request(body):
         time.sleep(step)
         tt = tt + step
 
-        GET = f"https://operation.api.cloud.yandex.net/operations/{idx}"
-        req = requests.get(GET.format(id=idx), headers=header)
+        GET = f"https://operation.api.cloud.yandex.net/operations/{id}"
+        req = requests.get(GET.format(id=id), headers=header)
         req = req.json()
 
         if req['done']:
             break
+        print("Not ready " + str(tt))
         local_logger.info(f"Not ready {str(tt)}")
 
     # Показать только текст из результатов распознавания.
     local_logger.info("Text chunks:")
+    save_json_recognition(req, os.path.splitext(body['audio']['uri'].split('/')[-1])[0])
+    save_text_recognition(req, os.path.splitext(body['audio']['uri'].split('/')[-1])[0])
+    try:
+        for chunk in req['response']['chunks']:
+            print(chunk['alternatives'][0]['text'])
+    except Exception as e:
+        print(e)
 
-    for chunk in req['response']['chunks']:
-        print(chunk['alternatives'][0]['text'])
 
 
 if __name__ == '__main__':
     unzip()
-    parse_wav_to_ogg()
     body_list = save_body_list()
     print(body_list)
-    print(body_list[0])
-    con = connect_session()
-    post_request(body_list[0])
-
+    print(body_list[2])
+    temp = (body_list[0]['audio']['uri'].split('/')[-1])
+    print(temp)
+    session = boto3.session.Session()
+    s3 = session.client(
+        service_name='s3',
+        endpoint_url=os.getenv('endpoint'),
+        aws_access_key_id=os.getenv('aws_access_key_id'),
+        aws_secret_access_key=os.getenv('aws_secret_access_key'),
+        region_name='ru-central1'
+    )
+    local_logger.info(f"Connect to session: {s3}")
+    for body in body_list:
+        upload_to_bucket(s3,
+                         body['audio']['uri'].split('/')[-1],
+                         os.path.splitext(body['audio']['uri'].split('/')[-2])[0])
+        post_request(body)
+    for key in s3.list_objects(Bucket=os.getenv('bucket_name'))['Contents']:
+        print(key['Key'])
 
