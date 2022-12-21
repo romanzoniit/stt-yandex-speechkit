@@ -11,8 +11,8 @@ import logging
 load_dotenv()
 
 link = os.getenv('storage_link') + os.getenv('bucket_name')
-
-header = {'Authorization': 'Api-Key {}'.format(os.getenv('api_key'))}
+api_key = ''
+header = {'Authorization': 'Api-Key {}'.format(api_key)}
 
 FORMAT = '%(asctime)s: %(levelname)s: %(name)s %(module)s: %(message)s'
 filename_log = str(os.getenv('LOGS_PATH') + os.getenv('FILENAME_LOG'))
@@ -121,7 +121,7 @@ def post_request(body):
     data = req.json()
     local_logger.info(f"data: {data}")
     print(data)
-    id = data['id']
+    idx = data['id']
     step = 30
     tt = 0
     # Запрашивать на сервере статус операции, пока распознавание не будет завершено.
@@ -130,8 +130,8 @@ def post_request(body):
         time.sleep(step)
         tt = tt + step
 
-        GET = "https://operation.api.cloud.yandex.net/operations/{id}"
-        req = requests.get(GET.format(id=id), headers=header)
+        GET = f"https://operation.api.cloud.yandex.net/operations/{idx}"
+        req = requests.get(GET.format(id=idx), headers=header)
         req = req.json()
 
         if req['done']:
@@ -151,7 +151,7 @@ if __name__ == '__main__':
     body_list = save_body_list()
     print(body_list)
     print(body_list[0])
-    """    con = connect_session()
-        post_request(body_list[0])"""
+    con = connect_session()
+    post_request(body_list[0])
 
 
