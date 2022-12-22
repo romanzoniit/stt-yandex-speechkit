@@ -7,6 +7,7 @@ from pydub import AudioSegment
 from dotenv import load_dotenv
 import zipfile
 import logging
+import difflib
 load_dotenv()
 
 link = os.getenv('storage_link') + os.getenv('bucket_name') + "/"
@@ -97,7 +98,8 @@ def save_body_list():
                                     "languageCode": "ru-RU",
                                     "audioEncoding": "LINEAR16_PCM",
                                     "model": "deferred-general",
-                                    "sampleRateHertz": 8000
+                                    "sampleRateHertz": 8000,
+                                    "rawResults": 'true'
                                 }
                             },
                             "audio": {
@@ -107,20 +109,55 @@ def save_body_list():
     return body_list
 
 
-def save_json_recognition(req, filename):
-    with open(f'{filename}.json', 'w', encoding='utf-8') as file:
+def save_json_recognition(req, path, filename):
+    if not os.path.exists(os.getenv('RECOGNITION_FILES_PATH') + str(path[0]) + '/'):
+        os.mkdir(os.getenv('RECOGNITION_FILES_PATH') + str(path[0]) + '/')
+    with open(os.getenv('RECOGNITION_FILES_PATH') + str(path[0]) + '/' + f'{filename}.json', 'w', encoding='utf-8') as file:
         json.dump(req, file, ensure_ascii=False, indent=4)
     local_logger.info(f"Save json recognition")
     return f'{filename}.json'
 
 
-def save_text_recognition(req, filename):
+def save_text_recognition(req, path, filename):
+    if not os.path.exists(os.getenv('RECOGNITION_FILES_PATH') + str(path[0]) + '/'):
+        os.mkdir(os.getenv('RECOGNITION_FILES_PATH') + str(path[0]) + '/')
     try:
-        with open(f'{filename}.txt', 'w', encoding='utf-8') as file:
+        with open(os.getenv('RECOGNITION_FILES_PATH') + str(path[0]) + '/' + f'{filename}.txt', 'w', encoding='utf-8') as file:
             for chunk in req['response']['chunks']:
                 file.writelines(chunk['alternatives'][0]['text'])
     except Exception as e:
         local_logger.error(e, exc_info=True)
+
+
+def file_to_json_data(file):
+    with open(file, 'r', encoding='utf-8') as read_file:
+        data = json.load(read_file)
+    return data
+
+
+def parse_json_yandex(rec_json, path, filename):
+    try:
+        with open(os.getenv('RECOGNITION_FILES_PATH') + str(path) + '/' + f'{filename}.txt', 'w',
+                  encoding='utf-8') as file:
+            for chunk in rec_json['response']['chunks']:
+                for word in chunk['alternatives'][0]['words']:
+                    file.writelines(word['word'] + '\n')
+            return file.name
+    except Exception as e:
+        local_logger.error(e, exc_info=True)
+
+def parse_json_vosk(rec_json, path):
+    filename = os.path.splitext(rec_json['filename'])[0]
+    try:
+        with open(os.getenv('RECOGNITION_FILES_PATH') + str(path) + '/' + f'{filename}_vosk.txt', 'w',
+                  encoding='utf-8') as file:
+            for words in rec_json['result']:
+                for word in words['words']:
+                    file.writelines(word['word'] + '\n')
+            return file.name
+    except Exception as e:
+        local_logger.error(e, exc_info=True)
+
 
 
 def post_request(body):
@@ -148,8 +185,8 @@ def post_request(body):
 
     # Показать только текст из результатов распознавания.
     local_logger.info("Text chunks:")
-    save_json_recognition(req, os.path.splitext(body['audio']['uri'].split('/')[-1])[0])
-    save_text_recognition(req, os.path.splitext(body['audio']['uri'].split('/')[-1])[0])
+    save_json_recognition(req, body['audio']['uri'].split('/')[-2:-1], os.path.splitext(body['audio']['uri'].split('/')[-1])[0])
+    save_text_recognition(req, body['audio']['uri'].split('/')[-2:-1], os.path.splitext(body['audio']['uri'].split('/')[-1])[0])
     try:
         for chunk in req['response']['chunks']:
             print(chunk['alternatives'][0]['text'])
@@ -157,15 +194,46 @@ def post_request(body):
         print(e)
 
 
+def read_file(file):
+    with open(file, 'r', encoding='utf-8') as read_file:
+        data = read_file.read()
+    return data
+
+
+def similarity(file1, file2, path, filename, ratio_list):
+    data1 = read_file(file1)
+    data2 = read_file(file2)
+
+    txt1 = data1.splitlines()
+    txt2 = data2.splitlines()
+
+    matcher = difflib.SequenceMatcher(None, txt1, txt2)
+    d = difflib .Differ()
+    diff = d.compare(txt1, txt2)
+    ratio_list.append({"filename": filename,
+                       "ratio": matcher.ratio()})
+    with open(os.getenv('RECOGNITION_FILES_PATH') + str(path) + '/' + f'{filename}_diff.txt', 'w',
+                  encoding='utf-8') as file:
+        file.writelines('\n'.join(diff))
+        file.writelines('\n' + str(matcher.ratio()))
+    return matcher.ratio()
+
 
 if __name__ == '__main__':
     unzip()
     body_list = save_body_list()
     print(body_list)
-    print(body_list[2])
-    temp = (body_list[0]['audio']['uri'].split('/')[-1])
+    print('++++')
+    print(body_list[0])
+    print('----')
+    temp = ' '.join(map(str, body_list[0]['audio']['uri'].split('/')[-2:-1]))
+    temp1 = (body_list[0]['audio']['uri'].split('/')[-2:-1])
     print(temp)
-    session = boto3.session.Session()
+    print('~~~~~~~~')
+    if not os.path.exists(os.getenv('RECOGNITION_FILES_PATH')):
+        os.mkdir(os.getenv('RECOGNITION_FILES_PATH'))
+    path = body_list[0]['audio']['uri'].split('/')[-2:-1]
+    """    session = boto3.session.Session()
     s3 = session.client(
         service_name='s3',
         endpoint_url=os.getenv('endpoint'),
@@ -180,5 +248,52 @@ if __name__ == '__main__':
                          os.path.splitext(body['audio']['uri'].split('/')[-2])[0])
         post_request(body)
     for key in s3.list_objects(Bucket=os.getenv('bucket_name'))['Contents']:
-        print(key['Key'])
+        print(key['Key'])"""
+    ratio_list = list()
+    for body in body_list:
+        body_str = ' '.join(map(str, body['audio']['uri'].split('/')[-2:-1]))
+        filename_ = body['audio']['uri'].split('-')[-1]
+        filename = filename_.split('/')[0]
+        data = file_to_json_data(os.getenv('RECOGNITION_FILES_PATH')
+                                 + body_str
+                                 + '/'
+                                 + os.path.splitext(body['audio']['uri'].split('/')[-1])[0]
+                                 + '.json')
+        file_yandex = parse_json_yandex(data,
+                          body_str,
+                          os.path.splitext(body['audio']['uri'].split('/')[-1])[0])
+        data_vosk = file_to_json_data(os.getenv('RECOGNITION_FILES_PATH')
+                                      + body_str
+                                      + '/'
+                                      + f"metadata-1-{filename}"
+                                      + '.json')
+        vosk_list = list()
+        for segment in data_vosk['segments']:
+            for pair in segment['pairAbonents']:
+                file_vosk = parse_json_vosk(pair, body_str)
+                vosk_list.append(file_vosk)
+        for mas_vosk in vosk_list:
+            if file_yandex and mas_vosk:
+                if file_yandex.split('.txt')[0] == mas_vosk.split('_vosk.txt')[0]:
+                    similarity(file_yandex,
+                               mas_vosk,
+                               body_str,
+                               os.path.splitext(body['audio']['uri'].split('/')[-1])[0],
+                               ratio_list)
+
+    print(ratio_list)
+    print(len(ratio_list))
+    summa_ratio = sum(item['ratio'] for item in ratio_list)
+    print(summa_ratio/len(ratio_list))
+    with open('stats.txt', 'w', encoding='utf-8') as file:
+        file.writelines('Статистика сравнения yandex и vosk\n')
+        file.writelines('Где T - общее число элементов в обеих последовательностях,\n'
+                        'а M - число совпадений. Мера подобия последовательностей это 2.0*M/T.\n'
+                        'Обратите внимание, что мера подобия равная 1.0 будет,\n'
+                        'если последовательности идентичны, и 0.0, если они не имеют ничего общего.\n')
+        file.writelines(f'Количество выборки: {len(ratio_list)}\n')
+        file.writelines(f'Средняя мера подобия: {summa_ratio/len(ratio_list)}\n')
+        for ratio in ratio_list:
+            file.writelines(str(ratio) + '\n')
+
 
